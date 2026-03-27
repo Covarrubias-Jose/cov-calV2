@@ -112,8 +112,8 @@
             <aside class="xl:col-span-4 flex flex-col gap-6">
                 <form id="add-event-form" class="hidden glass-panel p-6 rounded-2xl flex-col gap-4 border-blue-500/50 border">
                     <h3 class="text-sm font-bold text-blue-400 uppercase">New Family Event</h3>
-                    <input type="text" id="event-title" placeholder="Event Name" required class="bg-gray-900 border border-gray-700 p-3 rounded-lg outline-none text-sm">
-                    <input type="date" id="event-date" required class="bg-gray-900 border border-gray-700 p-3 rounded-lg outline-none text-sm">
+                    <input type="text" id="event-title" placeholder="Event Name" required class="bg-gray-900 border border-gray-700 p-3 rounded-lg outline-none text-sm text-white">
+                    <input type="date" id="event-date" required class="bg-gray-900 border border-gray-700 p-3 rounded-lg outline-none text-sm text-white">
                     <button type="submit" class="bg-blue-600 text-white font-bold py-3 rounded-lg text-sm">Save Event</button>
                 </form>
 
@@ -154,25 +154,20 @@
         </section>
 
         <footer class="text-center py-6 opacity-30 text-[10px] uppercase tracking-widest">
-            Family Command Center • v3.1 (Auto-Sync)
+            Family Command Center • v3.2 (Fixed Data Paths)
         </footer>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, doc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // CONFIGURATION: Replace with your Firebase settings
-        const firebaseConfig = { 
-            apiKey: "YOUR_API_KEY",
-            authDomain: "YOUR_AUTH_DOMAIN",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_STORAGE_BUCKET",
-            messagingSenderId: "YOUR_MESSAGING_ID",
-            appId: "YOUR_APP_ID"
-        };
-        const appNamespace = "family-pwa";
+        // CONFIGURATION: Using environment variables for safety
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-pwa';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : { apiKey: "YOUR_API_KEY", projectId: "YOUR_PROJECT_ID" }; // Fallback for local testing
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -184,6 +179,12 @@
         let idleTimer;
         let isIdle = false;
 
+        // --- Helper: Get Local YYYY-MM-DD ---
+        function getTodayString() {
+            const d = new Date();
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
         // --- Clocks ---
         const TZ = [
             { id: 'nyc', label: 'New York', zone: 'America/New_York', icon: '❄️', temp: '2°C' },
@@ -192,8 +193,11 @@
 
         function updateClocks() {
             const now = new Date();
-            document.getElementById('local-time').textContent = now.toLocaleTimeString('en-GB', { hour12: false });
-            document.getElementById('local-date').textContent = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+            const timeEl = document.getElementById('local-time');
+            const dateEl = document.getElementById('local-date');
+            if (timeEl) timeEl.textContent = now.toLocaleTimeString('en-GB', { hour12: false });
+            if (dateEl) dateEl.textContent = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+            
             const container = document.getElementById('work-clocks-container');
             if (container) {
                 container.innerHTML = TZ.map(t => {
@@ -207,14 +211,11 @@
             }
         }
 
-        // --- Google Calendar Sync (NEW LOGIC) ---
+        // --- Google Calendar Sync ---
         window.refreshGCal = () => {
             const id = localStorage.getItem('pwa_gcal_id');
             const frame = document.getElementById('gcal-frame');
             if (id && frame) {
-                console.log("Syncing Google Calendar...");
-                // Re-setting the SRC forces the iframe to reload. 
-                // We add a 't' parameter to prevent browser caching.
                 const baseUrl = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(id)}&ctz=UTC&mode=AGENDA&wkst=1&bgcolor=%231f2937&showTitle=0&showNav=0&showPrint=0&showTabs=0&showCalendars=0&showTz=0`;
                 frame.src = baseUrl + "&t=" + new Date().getTime();
             }
@@ -223,8 +224,6 @@
         // --- Idle logic ---
         function resetIdleTimer() {
             const overlay = document.getElementById('idle-overlay');
-            
-            // If we were idle and are now "waking up", refresh the calendar
             if (isIdle) {
                 isIdle = false;
                 window.refreshGCal();
@@ -234,11 +233,16 @@
             clearTimeout(idleTimer);
             idleTimer = setTimeout(() => {
                 isIdle = true;
-                const today = new Date().toISOString().split('T')[0];
+                const today = getTodayString();
                 const evts = familyEvents.filter(e => e.date === today);
-                document.getElementById('idle-events-content').innerHTML = evts.length ? evts.map(e => `<p class="text-2xl text-white font-bold">${e.title}</p>`).join('') : '<p class="text-xl text-gray-500">No events today</p>';
-                document.getElementById('idle-overlay').style.display = 'flex';
-            }, 30000); // 30 seconds idle
+                const contentEl = document.getElementById('idle-events-content');
+                if (contentEl) {
+                    contentEl.innerHTML = evts.length 
+                        ? evts.map(e => `<p class="text-2xl text-white font-bold">${e.title}</p>`).join('') 
+                        : '<p class="text-xl text-gray-500">No events today</p>';
+                }
+                if (overlay) overlay.style.display = 'flex';
+            }, 30000); 
         }
 
         // --- Calendar & Tasks ---
@@ -248,12 +252,16 @@
             if (!grid) return;
             grid.innerHTML = '';
             monthLabel.textContent = viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            
             const year = viewDate.getFullYear();
             const month = viewDate.getMonth();
             const firstDay = new Date(year, month, 1).getDay();
             const daysInMonth = new Date(year, month + 1, 0).getDate();
             const startOffset = firstDay === 0 ? 6 : firstDay - 1;
             const prevMonthLastDay = new Date(year, month, 0).getDate();
+            
+            const todayStr = getTodayString();
+
             for (let i = startOffset; i > 0; i--) createDayCell(prevMonthLastDay - i + 1, true);
             for (let i = 1; i <= daysInMonth; i++) createDayCell(i, false, year, month);
 
@@ -261,10 +269,14 @@
                 const cell = document.createElement('div');
                 cell.className = `calendar-day ${isOtherMonth ? 'other-month' : ''}`;
                 const dateStr = !isOtherMonth ? `${y}-${String(m + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}` : null;
-                if (dateStr === new Date().toISOString().split('T')[0]) cell.classList.add('today');
+                
+                if (dateStr === todayStr) cell.classList.add('today');
+                
                 cell.innerHTML = `<span class="text-xs font-bold ${cell.classList.contains('today') ? 'text-blue-400' : 'text-gray-500'}">${dayNum}</span>`;
+                
                 if (dateStr) {
-                    familyEvents.filter(e => e.date === dateStr).forEach(e => {
+                    const dayEvts = familyEvents.filter(e => e.date === dateStr);
+                    dayEvts.forEach(e => {
                         const evt = document.createElement('div');
                         evt.className = "text-[9px] bg-blue-600/30 text-blue-100 p-1 rounded mt-1 truncate border border-blue-500/20";
                         evt.textContent = e.title;
@@ -304,21 +316,44 @@
         };
 
         // --- Firebase ---
-        signInAnonymously(auth).then(() => {
-            onAuthStateChanged(auth, user => {
-                if (user) {
-                    document.getElementById('auth-status').textContent = "Cloud Sync Active";
-                    onSnapshot(collection(db, appNamespace, 'data', 'events'), s => { familyEvents = []; s.forEach(d => familyEvents.push({id: d.id, ...d.data()})); renderCalendar(); }, e => console.error(e));
-                    onSnapshot(collection(db, appNamespace, 'data', 'tasks'), s => { familyTasks = []; s.forEach(d => familyTasks.push({id: d.id, ...d.data()})); renderTasks(); }, e => console.error(e));
-                }
-            });
+        const initFirebase = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+
+        initFirebase().catch(e => console.error("Auth failed:", e));
+
+        onAuthStateChanged(auth, user => {
+            if (user) {
+                document.getElementById('auth-status').textContent = "Cloud Sync Active";
+                
+                // MANDATORY PATHS: collection(db, 'artifacts', appId, 'public', 'data', collectionName)
+                const eventsRef = collection(db, 'artifacts', appId, 'public', 'data', 'events');
+                const tasksRef = collection(db, 'artifacts', appId, 'public', 'data', 'tasks');
+
+                onSnapshot(eventsRef, s => { 
+                    familyEvents = []; 
+                    s.forEach(d => familyEvents.push({id: d.id, ...d.data()})); 
+                    renderCalendar(); 
+                }, e => console.error("Events Load Error:", e));
+
+                onSnapshot(tasksRef, s => { 
+                    familyTasks = []; 
+                    s.forEach(d => familyTasks.push({id: d.id, ...d.data()})); 
+                    renderTasks(); 
+                }, e => console.error("Tasks Load Error:", e));
+            }
         });
 
         document.getElementById('add-event-form').onsubmit = async e => {
             e.preventDefault();
             const title = document.getElementById('event-title').value;
             const date = document.getElementById('event-date').value;
-            await addDoc(collection(db, appNamespace, 'data', 'events'), { title, date });
+            const eventsRef = collection(db, 'artifacts', appId, 'public', 'data', 'events');
+            await addDoc(eventsRef, { title, date });
             e.target.reset(); window.toggleEventForm();
         };
 
@@ -327,27 +362,32 @@
             const text = document.getElementById('task-text').value;
             const assignee = document.getElementById('task-assignee').value;
             const due = document.getElementById('task-due').value;
-            await addDoc(collection(db, appNamespace, 'data', 'tasks'), { text, assignee, due, done: false });
+            const tasksRef = collection(db, 'artifacts', appId, 'public', 'data', 'tasks');
+            await addDoc(tasksRef, { text, assignee, due, done: false });
             e.target.reset(); window.toggleTaskForm();
         };
 
-        window.toggleTask = async (id, status) => { await updateDoc(doc(db, appNamespace, 'data', 'tasks', id), { done: !status }); };
+        window.toggleTask = async (id, status) => { 
+            const taskDoc = doc(db, 'artifacts', appId, 'public', 'data', 'tasks', id);
+            await updateDoc(taskDoc, { done: !status }); 
+        };
 
         // --- Init ---
         ['mousemove', 'mousedown', 'touchstart', 'scroll'].forEach(e => window.addEventListener(e, resetIdleTimer));
         
         const savedId = localStorage.getItem('pwa_gcal_id');
         if (savedId) { 
-            document.getElementById('gcal-id').value = savedId; 
+            const input = document.getElementById('gcal-id');
+            if (input) input.value = savedId;
             window.refreshGCal(); 
         }
 
         setInterval(updateClocks, 1000);
-        // Auto-Sync Calendar every 10 minutes (600,000 ms)
         setInterval(window.refreshGCal, 600000); 
 
-        updateClocks(); renderCalendar(); resetIdleTimer();
-        if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(e => {})); }
+        updateClocks(); 
+        renderCalendar(); 
+        resetIdleTimer();
     </script>
 </body>
 </html>
