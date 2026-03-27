@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Command Center</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;600;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117;
+            color: #e5e7eb;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .slim-text { font-weight: 100; }
+        
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 1px;
+            background-color: #374151;
+            border: 1px solid #374151;
+            border-radius: 0.75rem;
+            overflow: hidden;
+        }
+
+        .calendar-day {
+            background-color: #1f2937;
+            min-height: 100px;
+            padding: 0.5rem;
+            transition: background-color 0.2s;
+        }
+
+        .calendar-day:hover { background-color: #2d3748; }
+        .calendar-day.today { background-color: #111827; box-shadow: inset 0 0 0 2px #3b82f6; }
+        .calendar-day.other-month { opacity: 0.3; }
+
+        .glass-panel {
+            background-color: rgba(31, 41, 55, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(75, 85, 99, 0.4);
+        }
+
+        #idle-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(13, 17, 23, 0.85);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #111827; }
+        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+    </style>
+</head>
+<body class="antialiased p-4 sm:p-6" id="main-body">
+
+    <div id="idle-overlay">
+        <div class="glass-panel p-10 rounded-3xl max-w-2xl w-full text-center border-blue-500/50 border-2">
+            <h2 class="text-4xl font-light text-blue-400 mb-6 uppercase tracking-widest">Today's Schedule</h2>
+            <div id="idle-events-content" class="space-y-4"></div>
+            <p class="text-gray-500 mt-8 text-sm animate-pulse">Touch or Move to Return</p>
+        </div>
+    </div>
+
+    <div id="app" class="max-w-[1600px] mx-auto flex flex-col gap-8">
+        
+        <header class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="lg:col-span-5 glass-panel p-6 rounded-2xl shadow-2xl flex flex-col justify-center">
+                <h2 class="text-xs uppercase tracking-[0.2em] text-blue-400 font-semibold mb-2">Local Time</h2>
+                <h1 id="local-time" class="text-6xl sm:text-7xl slim-text tracking-tighter text-white">--:--:--</h1>
+                <p id="local-date" class="text-gray-400 font-light mt-1 text-lg">---</p>
+                <p id="auth-status" class="text-[10px] text-gray-600 italic mt-4">Initializing Cloud Sync...</p>
+            </div>
+
+            <div class="lg:col-span-7 glass-panel p-6 rounded-2xl flex flex-col">
+                <h2 class="text-xs uppercase tracking-[0.2em] text-gray-400 font-semibold mb-4">Remote Operations</h2>
+                <div id="work-clocks-container" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            <section class="xl:col-span-8 glass-panel p-6 rounded-2xl shadow-2xl">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 id="calendar-month-year" class="text-2xl font-light text-white">Month Year</h2>
+                    <div class="flex gap-2">
+                        <button onclick="changeMonth(-1)" class="p-2 hover:bg-gray-700 rounded-full transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                        <button onclick="changeMonth(1)" class="p-2 hover:bg-gray-700 rounded-full transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                        <button onclick="window.toggleEventForm()" class="ml-4 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-xs font-bold transition">+ Add Event</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-7 text-center text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">
+                    <div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div><div>Sun</div>
+                </div>
+                <div id="calendar-grid" class="calendar-grid"></div>
+            </section>
+
+            <aside class="xl:col-span-4 flex flex-col gap-6">
+                <form id="add-event-form" class="hidden glass-panel p-6 rounded-2xl flex-col gap-4 border-blue-500/50 border">
+                    <h3 class="text-sm font-bold text-blue-400 uppercase">New Family Event</h3>
+                    <input type="text" id="event-title" placeholder="Event Name" required class="bg-gray-900 border border-gray-700 p-3 rounded-lg outline-none text-sm">
+                    <input type="date" id="event-date" required class="bg-gray-900 border border-gray-700 p-3 rounded-lg outline-none text-sm">
+                    <button type="submit" class="bg-blue-600 text-white font-bold py-3 rounded-lg text-sm">Save Event</button>
+                </form>
+
+                <section class="glass-panel p-4 rounded-2xl h-[400px]">
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="text-xs font-bold text-gray-400 uppercase">Agenda Sync</h2>
+                        <button onclick="window.toggleGCalSettings()" class="text-[10px] text-blue-400 hover:underline">Setup</button>
+                    </div>
+                    <div id="gcal-settings" class="hidden mb-4 p-3 bg-gray-900 rounded-lg border border-gray-700">
+                        <input type="text" id="gcal-id" placeholder="Calendar ID (Email)" class="w-full bg-black border border-gray-700 p-2 rounded text-xs mb-2 text-white">
+                        <button onclick="window.saveGCal()" class="w-full bg-blue-600 hover:bg-blue-500 text-[10px] font-bold py-1 rounded transition text-white">Update Calendar</button>
+                    </div>
+                    <iframe id="gcal-frame" src="" style="border: 0" width="100%" height="85%" frameborder="0" scrolling="no" class="rounded-xl opacity-80"></iframe>
+                </section>
+            </aside>
+        </main>
+
+        <section class="glass-panel p-6 rounded-3xl shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-light uppercase tracking-[0.2em] text-gray-300">Family Tasks</h2>
+                <button onclick="window.toggleTaskForm()" class="text-xs text-blue-400 hover:underline">Add Task</button>
+            </div>
+            <form id="add-task-form" class="hidden grid grid-cols-1 sm:grid-cols-4 gap-4 mb-8 bg-gray-900/50 p-6 rounded-2xl border border-gray-700">
+                <input type="text" id="task-text" placeholder="Task..." required class="bg-black border border-gray-700 p-2 rounded text-sm text-white">
+                <select id="task-assignee" class="bg-black border border-gray-700 p-2 rounded text-sm text-white">
+                    <option value="Mom">Mom</option><option value="Dad">Dad</option>
+                    <option value="Son">Son</option><option value="Daughter">Daughter</option>
+                </select>
+                <input type="date" id="task-due" required class="bg-black border border-gray-700 p-2 rounded text-sm text-white">
+                <button type="submit" class="bg-blue-600 text-white font-bold py-2 rounded text-sm">Add Task</button>
+            </form>
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6" id="tasks-grid"></div>
+        </section>
+
+        <footer class="text-center py-6 opacity-30 text-[10px] uppercase tracking-widest">
+            Family Command Center • Cloud Version
+        </footer>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, doc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // CONFIGURATION: Replace with your Firebase settings
+        const firebaseConfig = { 
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_ID",
+            appId: "YOUR_APP_ID"
+        };
+        const appNamespace = "family-pwa";
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        let familyEvents = [];
+        let familyTasks = [];
+        let viewDate = new Date();
+        let idleTimer;
+
+        // --- Clocks ---
+        const TZ = [
+            { id: 'nyc', label: 'New York', zone: 'America/New_York', icon: '❄️', temp: '2°C' },
+            { id: 'ldn', label: 'London', zone: 'Europe/London', icon: '🌧️', temp: '8°C' }
+        ];
+
+        function updateClocks() {
+            const now = new Date();
+            document.getElementById('local-time').textContent = now.toLocaleTimeString('en-GB', { hour12: false });
+            document.getElementById('local-date').textContent = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+            const container = document.getElementById('work-clocks-container');
+            if (container) {
+                container.innerHTML = TZ.map(t => {
+                    const time = now.toLocaleTimeString('en-GB', { timeZone: t.zone, hour: '2-digit', minute: '2-digit', hour12: false });
+                    return `<div class="flex justify-between items-center bg-gray-800/30 p-4 rounded-xl border border-gray-700/50">
+                        <div><p class="text-[9px] text-gray-500 uppercase font-black tracking-widest">${t.label}</p>
+                        <p class="text-2xl slim-text text-white">${time}</p></div>
+                        <div class="flex items-center gap-4"><span class="text-3xl">${t.icon}</span>
+                        <p class="text-sm font-light text-blue-400">${t.temp}</p></div></div>`;
+                }).join('');
+            }
+        }
+
+        // --- Calendar & Tasks ---
+        function renderCalendar() {
+            const grid = document.getElementById('calendar-grid');
+            const monthLabel = document.getElementById('calendar-month-year');
+            if (!grid) return;
+            grid.innerHTML = '';
+            monthLabel.textContent = viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            const year = viewDate.getFullYear();
+            const month = viewDate.getMonth();
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const startOffset = firstDay === 0 ? 6 : firstDay - 1;
+            const prevMonthLastDay = new Date(year, month, 0).getDate();
+            for (let i = startOffset; i > 0; i--) createDayCell(prevMonthLastDay - i + 1, true);
+            for (let i = 1; i <= daysInMonth; i++) createDayCell(i, false, year, month);
+
+            function createDayCell(dayNum, isOtherMonth, y, m) {
+                const cell = document.createElement('div');
+                cell.className = `calendar-day ${isOtherMonth ? 'other-month' : ''}`;
+                const dateStr = !isOtherMonth ? `${y}-${String(m + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}` : null;
+                if (dateStr === new Date().toISOString().split('T')[0]) cell.classList.add('today');
+                cell.innerHTML = `<span class="text-xs font-bold ${cell.classList.contains('today') ? 'text-blue-400' : 'text-gray-500'}">${dayNum}</span>`;
+                if (dateStr) {
+                    familyEvents.filter(e => e.date === dateStr).forEach(e => {
+                        const evt = document.createElement('div');
+                        evt.className = "text-[9px] bg-blue-600/30 text-blue-100 p-1 rounded mt-1 truncate border border-blue-500/20";
+                        evt.textContent = e.title;
+                        cell.appendChild(evt);
+                    });
+                }
+                grid.appendChild(cell);
+            }
+        }
+
+        function renderTasks() {
+            const members = ['Mom', 'Dad', 'Son', 'Daughter'];
+            const container = document.getElementById('tasks-grid');
+            if (!container) return;
+            container.innerHTML = members.map(m => `
+                <div class="bg-gray-800/40 p-5 rounded-2xl border border-gray-700/50">
+                    <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 text-center">${m}</h3>
+                    <div class="space-y-3">
+                        ${familyTasks.filter(t => t.assignee === m).map(t => `
+                            <div class="flex items-center gap-3 bg-black/40 p-2 rounded-lg text-xs ${t.done ? 'opacity-40 line-through' : ''}">
+                                <input type="checkbox" ${t.done ? 'checked' : ''} onchange="window.toggleTask('${t.id}', ${t.done})" class="accent-blue-500">
+                                <span class="flex-grow">${t.text}</span>
+                            </div>
+                        `).join('') || '<p class="text-[10px] text-gray-600 text-center italic">No tasks</p>'}
+                    </div>
+                </div>`).join('');
+        }
+
+        // --- Idle logic ---
+        function resetIdleTimer() {
+            document.getElementById('idle-overlay').style.display = 'none';
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                const today = new Date().toISOString().split('T')[0];
+                const evts = familyEvents.filter(e => e.date === today);
+                document.getElementById('idle-events-content').innerHTML = evts.length ? evts.map(e => `<p class="text-2xl text-white font-bold">${e.title}</p>`).join('') : '<p class="text-xl text-gray-500">No events today</p>';
+                document.getElementById('idle-overlay').style.display = 'flex';
+            }, 15000);
+        }
+
+        // --- Interface ---
+        window.toggleEventForm = () => document.getElementById('add-event-form').classList.toggle('hidden');
+        window.toggleTaskForm = () => document.getElementById('add-task-form').classList.toggle('hidden');
+        window.toggleGCalSettings = () => document.getElementById('gcal-settings').classList.toggle('hidden');
+        window.changeMonth = (dir) => { viewDate.setMonth(viewDate.getMonth() + dir); renderCalendar(); };
+        window.saveGCal = () => {
+            const id = document.getElementById('gcal-id').value.trim();
+            if (id) { localStorage.setItem('pwa_gcal_id', id); loadGCal(id); window.toggleGCalSettings(); }
+        };
+        function loadGCal(id) {
+            document.getElementById('gcal-frame').src = id ? `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(id)}&ctz=UTC&mode=AGENDA&wkst=1&bgcolor=%231f2937&showTitle=0&showNav=0&showPrint=0&showTabs=0&showCalendars=0&showTz=0` : "";
+        }
+
+        // --- Firebase ---
+        signInAnonymously(auth).then(() => {
+            onAuthStateChanged(auth, user => {
+                if (user) {
+                    document.getElementById('auth-status').textContent = "Cloud Sync Active";
+                    onSnapshot(collection(db, appNamespace, 'data', 'events'), s => { familyEvents = []; s.forEach(d => familyEvents.push({id: d.id, ...d.data()})); renderCalendar(); }, e => console.error(e));
+                    onSnapshot(collection(db, appNamespace, 'data', 'tasks'), s => { familyTasks = []; s.forEach(d => familyTasks.push({id: d.id, ...d.data()})); renderTasks(); }, e => console.error(e));
+                }
+            });
+        });
+
+        document.getElementById('add-event-form').onsubmit = async e => {
+            e.preventDefault();
+            const title = document.getElementById('event-title').value;
+            const date = document.getElementById('event-date').value;
+            await addDoc(collection(db, appNamespace, 'data', 'events'), { title, date });
+            e.target.reset(); window.toggleEventForm();
+        };
+
+        document.getElementById('add-task-form').onsubmit = async e => {
+            e.preventDefault();
+            const text = document.getElementById('task-text').value;
+            const assignee = document.getElementById('task-assignee').value;
+            const due = document.getElementById('task-due').value;
+            await addDoc(collection(db, appNamespace, 'data', 'tasks'), { text, assignee, due, done: false });
+            e.target.reset(); window.toggleTaskForm();
+        };
+
+        window.toggleTask = async (id, status) => { await updateDoc(doc(db, appNamespace, 'data', 'tasks', id), { done: !status }); };
+
+        // --- Init ---
+        ['mousemove', 'mousedown', 'touchstart', 'scroll'].forEach(e => window.addEventListener(e, resetIdleTimer));
+        const savedId = localStorage.getItem('pwa_gcal_id');
+        if (savedId) { document.getElementById('gcal-id').value = savedId; loadGCal(savedId); }
+        setInterval(updateClocks, 1000);
+        updateClocks(); renderCalendar(); resetIdleTimer();
+        if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(e => {})); }
+    </script>
+</body>
+</html>
