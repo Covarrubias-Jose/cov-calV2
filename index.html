@@ -54,7 +54,7 @@
                 <h2 class="text-xs uppercase tracking-[0.2em] text-blue-400 font-semibold mb-2">Local Time</h2>
                 <h1 id="local-time" class="text-6xl sm:text-7xl slim-text tracking-tighter text-white">--:--:--</h1>
                 <p id="local-date" class="text-gray-400 font-light mt-1 text-lg">---</p>
-                <p id="auth-status" class="text-[10px] text-gray-600 italic mt-4 uppercase tracking-tighter">Connecting...</p>
+                <p id="auth-status" class="text-[10px] text-gray-600 italic mt-4 uppercase tracking-tighter">Initializing...</p>
             </div>
 
             <!-- World Clocks Section -->
@@ -141,7 +141,7 @@
         </section>
 
         <footer class="text-center py-6 opacity-30 text-[10px] uppercase tracking-widest">
-            Family Command Center • v4.0 (Integrated Boards)
+            Family Command Center • v4.2 (GitHub Optimized)
         </footer>
     </div>
 
@@ -150,11 +150,23 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, doc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // --- SAFETY GATES FOR GITHUB DEPLOYMENT ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-pwa';
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+        
+        let db, auth;
+
+        // Initialize Firebase only if config exists
+        if (firebaseConfigStr) {
+            try {
+                const config = JSON.parse(firebaseConfigStr);
+                const app = initializeApp(config);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            } catch (e) {
+                console.error("Firebase config error:", e);
+            }
+        }
 
         let familyTasks = [];
 
@@ -179,15 +191,15 @@
             { label: "Mumbai", zone: "Asia/Kolkata" }, { label: "Nairobi", zone: "Africa/Nairobi" },
             { label: "New York", zone: "America/New_York" }, { label: "Paris", zone: "Europe/Paris" },
             { label: "Perth", zone: "Australia/Perth" }, { label: "Phoenix", zone: "America/Phoenix" },
-            { label: "Prague", zone: "Europe/Prague" }, { label: "Rio de Janeiro", zone: "America/Sao_Paulo" },
-            { label: "Rome", zone: "Europe/Rome" }, { label: "Santiago", zone: "America/Santiago" },
-            { label: "Sao Paulo", zone: "America/Sao_Paulo" }, { label: "Seoul", zone: "Asia/Seoul" },
-            { label: "Singapore", zone: "Asia/Singapore" }, { label: "Stockholm", zone: "Europe/Stockholm" },
-            { label: "Sydney", zone: "Australia/Sydney" }, { label: "Taipei", zone: "Asia/Taipei" },
-            { label: "Tokyo", zone: "Asia/Tokyo" }, { label: "Toronto", zone: "America/Toronto" },
-            { label: "Vancouver", zone: "America/Vancouver" }, { label: "Vienna", zone: "Europe/Vienna" },
-            { label: "Warsaw", zone: "Europe/Warsaw" }, { label: "Zurich", zone: "Europe/Zurich" },
-            { label: "UTC / GMT", zone: "UTC" }
+            { label: "Prague", zone: "Europe/Prague" }, { label: "Puerto Peñasco", zone: "America/Hermosillo" },
+            { label: "Rio de Janeiro", zone: "America/Sao_Paulo" }, { label: "Rome", zone: "Europe/Rome" }, 
+            { label: "Santiago", zone: "America/Santiago" }, { label: "Sao Paulo", zone: "America/Sao_Paulo" }, 
+            { label: "Seoul", zone: "Asia/Seoul" }, { label: "Singapore", zone: "Asia/Singapore" }, 
+            { label: "Stockholm", zone: "Europe/Stockholm" }, { label: "Sydney", zone: "Australia/Sydney" }, 
+            { label: "Taipei", zone: "Asia/Taipei" }, { label: "Tokyo", zone: "Asia/Tokyo" }, 
+            { label: "Toronto", zone: "America/Toronto" }, { label: "Vancouver", zone: "America/Vancouver" }, 
+            { label: "Vienna", zone: "Europe/Vienna" }, { label: "Warsaw", zone: "Europe/Warsaw" }, 
+            { label: "Zurich", zone: "Europe/Zurich" }, { label: "UTC / GMT", zone: "UTC" }
         ].sort((a,b) => a.label.localeCompare(b.label));
 
         let customTZ = [{ label: 'London', zone: 'Europe/London' }, { label: 'Tokyo', zone: 'Asia/Tokyo' }];
@@ -281,9 +293,16 @@
         };
 
         const startApp = async () => {
+            if (!auth || !db) {
+                const statusEl = document.getElementById('auth-status');
+                if (statusEl) statusEl.textContent = "Offline Mode (Clock Only)";
+                return;
+            }
+
             try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
+                const initialToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                if (initialToken) {
+                    await signInWithCustomToken(auth, initialToken);
                 } else {
                     await signInAnonymously(auth);
                 }
@@ -308,21 +327,39 @@
             const text = document.getElementById('task-text').value;
             const assignee = document.getElementById('task-assignee').value;
             const due = document.getElementById('task-due').value;
-            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), { text, assignee, due, done: false });
-            e.target.reset(); window.toggleTaskForm();
+            
+            if (db) {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), { text, assignee, due, done: false });
+            } else {
+                familyTasks.push({ id: Date.now().toString(), text, assignee, due, done: false });
+                renderTasks();
+            }
+            
+            e.target.reset(); 
+            window.toggleTaskForm();
         };
 
         window.toggleTask = async (id, status) => { 
-            const taskDoc = doc(db, 'artifacts', appId, 'public', 'data', 'tasks', id);
-            await updateDoc(taskDoc, { done: !status }); 
+            if (db) {
+                const taskDoc = doc(db, 'artifacts', appId, 'public', 'data', 'tasks', id);
+                await updateDoc(taskDoc, { done: !status }); 
+            } else {
+                familyTasks = familyTasks.map(t => t.id === id ? {...t, done: !status} : t);
+                renderTasks();
+            }
         };
 
         const savedGId = localStorage.getItem('pwa_gcal_id');
-        if (savedGId) { document.getElementById('gcal-id').value = savedGId; window.refreshGCal(); }
+        if (savedGId) { 
+            const input = document.getElementById('gcal-id');
+            if (input) input.value = savedGId;
+            window.refreshGCal(); 
+        }
 
+        updateClocks();
         setInterval(updateClocks, 1000);
         setInterval(window.refreshGCal, 600000); 
-        updateClocks(); startApp();
+        startApp();
     </script>
 </body>
 </html>
